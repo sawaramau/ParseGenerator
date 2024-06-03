@@ -696,9 +696,9 @@ class ExtendedBackusNaurFormAnalyser {
                         return (strObj, index) => {
                             let str = "";
                             let len = 0;
+                            const children = [];
                             while(1) {
                                 const s = operator.largs[0].generateAnalyzer(strObj, index + len);
-                                const children = [];
                                 if (s === undefined) {
                                     break;
                                 }

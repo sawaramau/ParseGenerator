@@ -38,10 +38,10 @@
 ```js
 const bnf = `
 e = "" // 空集合は''で表現不可
-w = \s w
+w = \\s | \\s w 
 white = w | e
 not_zero = '1-9'
-digit = \d
+digit = \\d
 digits = digit | digit digits
 integer = white '0' white | white int white
 int = not_zero int_l  // 左再帰は不可なので、ループ表現に変える。またはint = not_zero digits*とする

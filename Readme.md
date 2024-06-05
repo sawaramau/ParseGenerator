@@ -17,13 +17,19 @@
 <factor> ::= <leaf> | <option>
 <option> ::= '[' <define> ']'
 <leaf> ::= <terminal> | <nonTerminal> | '(' <define> ')'
-<terminal> ::= '"' <string> '"' | "'" <string> "'"
+<terminal> ::= '"' <string> '"' | <charset>
+<charset> ::= "'" <string> "'"
 <nonTerminal> ::= <string>
 ```
 
 * 左再帰を解析できないため、左再帰が出現する際には手動でBNF自体をループ構造に変更すること
 * 一般的なBNFだと<>は非終端記号だったりするけれど、本パーサでは構文の（大体）トークンを意味する宣言として扱う
   * <>で定義した項に対して演算を後述する方法で演算を定義可能
+* charsetでは例えばa~zまでを定義したい場合に`'a-z'`と定義可能。また`'abc'`と記述すると`"a" | "b" | "c"`と等価となる
+* 単に`\w`と書くと`'_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'`と等価
+* 単に`\s`と書くと`' \t\n'`と等価
+* 単に`\d`と書くと`'0123456789'`と等価
+* 単に`.`と書くとあらゆる1文字にマッチする終端文字として扱う。（.+や.*と書くと解析不能になると思う。試してないけど
 
 ## 定義サンプル
 
@@ -31,14 +37,14 @@
 
 ```js
 const bnf = `
-e = ''
-w = ' ' | ' ' w | '\t' | '\t' w | '\n' | '\n' w
+e = "" // 空集合は''で表現不可
+w = \s w
 white = w | e
-not_zero = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-digit = '0' | not_zero
+not_zero = '1-9'
+digit = \d
 digits = digit | digit digits
 integer = white '0' white | white int white
-int = not_zero int_l
+int = not_zero int_l  // 左再帰は不可なので、ループ表現に変える。またはint = not_zero digits*とする
 int_l = digits int_l | e
 float = integer | white '0.' digits white | white int '.' digits white
 sign = white '+' white | white '-' white | white '+' sign | white '-' sign

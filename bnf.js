@@ -208,6 +208,92 @@ class Operand {
     }
 }
 
+class CharSet extends Operand {
+    constructor(obj, open, close) {
+        super(obj, open, close);
+        if(obj === '') {
+            throw '空集合を定義する場合、文字セット定義' + open + ',' + close + 'を使用しないでください';
+        }
+    }
+    get set() {
+        const str = this.own.split('');
+        const escs = {
+            s: [' ', '\t', '\n'],
+            t: ['\t'],
+            n: ['\n'],
+            w: "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split(''),
+            d: "0123456789".split('')
+        }
+        const result = [];
+        let esc = false;
+        let range = false;
+        const rangeFunc = (prev, cur) => {
+            const prevCode = prev.slice(-1)[0].charCodeAt(0);
+            const endCode = cur.slice(-1)[0].charCodeAt(0);
+            const diff = endCode - prevCode;
+            const tmp = new Array(diff + 1);
+            Array.prototype.push.apply(prev, tmp.fill(0).map((cur, i) => String.fromCharCode(prevCode + i)));
+        };
+        while (str.length) {
+            const char = str.shift();
+            if(esc){
+                if(range) {
+                    if(char in escs) {
+                        rangeFunc(result, escs[char]);
+                    } else {
+                        rangeFunc(result, [char]);
+                    }
+                    range = false;
+                } else {
+                    if(char in escs) {
+                        Array.prototype.push.apply(result, escs[char]);
+                    } else {
+                        result.push(char);
+                    }
+                }
+                esc = false;
+            } else {
+                if(char === '\\') {
+                    esc = true;
+                } else if (range) {
+                    rangeFunc(result, [char]);
+                    range = false;
+                } else if (char === '-') {
+                    if(result.length) {
+                        range = true;
+                    } else {
+                        result.push(char);
+                    }
+                } else {
+                    result.push(char);
+                }
+            }
+        }
+        return new Set(result);
+    } 
+    match(char) {
+        if(char.length !== 1) {
+            return false;
+        }
+        return this.set.has(char);
+    }
+    get generateAnalyzer() {
+        try {
+            const self = this;
+            return (strObj, index) => {
+                const s = strObj.read(index, 1);
+                if(!this.set.has(s)) {
+                    return undefined;
+                }
+                return new Syntax(s, self, []);
+            }
+        } catch(e) {
+            myconsole.log(this.own);
+            throw e;
+        }
+    }
+}
+
 class Group extends Operand {
     #parent;
     constructor(own, open, close) {
@@ -425,7 +511,7 @@ class ExtendedBackusNaurFormAnalyser {
         return tokens;
     }
     parseLine(strObj, close = '\n', escape = '\\') {
-        const candidates = ['::=', '=', '|', '<', '>', '+', '*', '(', ')', '[', ']', '"', "'", '//'];
+        const candidates = ['::=', '=', '|', '<', '>', '+', '*', '(', ')', '[', ']', '"', "'", '//', '.', '\\w', '\\d', '\\s'];
         const isEBNFs = ['+', '*', '(', '['];
         const whites = [' ', '\t', '\n'];
         const others = /^[^\t\n \:=\|\<\>\+\*\(\)\[\]\'\"\/]+$/;
@@ -578,7 +664,8 @@ class ExtendedBackusNaurFormAnalyser {
     parseTree(tokens) {
         const terminals = [];
         const boxes = {
-            terminal:[['"', '"'], ["'", "'"]],
+            terminal:[['"', '"'],], // ["'", "'"]],
+            charSet: [["'", "'"]],
             comment:[['//', '\n']],
             //nonTerminal:[['<', '>']],
             //token:[],
@@ -737,6 +824,76 @@ class ExtendedBackusNaurFormAnalyser {
                     }
                 },    
             ],
+            [
+                {
+                    symbol: '.',
+                    order : 1, // left
+                    left:[0, 0],
+                    right:[0, 0],
+                    generateAnalyzer: (operator) => {
+                        return (strObj, index) => {
+                            let str = strObj.read(index, 1);
+                            const children = [];
+                            if(str.length !== 1) {
+                                return undefined;
+                            }
+                            return new Syntax(str, operator, children);
+                        }
+                    }
+                },
+                {
+                    symbol: '\\s',
+                    order : 1, // left
+                    left:[0, 0],
+                    right:[0, 0],
+                    generateAnalyzer: (operator) => {
+                        return (strObj, index) => {
+                            let str = strObj.read(index, 1);
+                            const children = [];
+                            const whites = [' ', '\t', '\n'];
+                            if(!whites.includes(str)) {
+                                return undefined;
+                            }
+                            return new Syntax(str, operator, children);
+                        }
+                    }
+                },
+                {
+                    symbol: '\\d',
+                    order : 1, // left
+                    left:[0, 0],
+                    right:[0, 0],
+                    generateAnalyzer: (operator) => {
+                        return (strObj, index) => {
+                            let set = new Set("0123456789".split(''));
+                            let str = strObj.read(index, 1);
+                            const children = [];
+                            if(!set.has(str)) {
+                                return undefined;
+                            }
+                            return new Syntax(str, operator, children);
+                        }
+                    }
+                },
+                {
+                    symbol: '\\w',
+                    order : 1, // left
+                    left:[0, 0],
+                    right:[0, 0],
+                    generateAnalyzer: (operator) => {
+                        return (strObj, index) => {
+                            let set = new Set("_0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".split(''));
+                            let str = strObj.read(index, 1);
+                            const children = [];
+                            if(!set.has(str)) {
+                                return undefined;
+                            }
+                            return new Syntax(str, operator, children);
+                        }
+                    }
+                },
+
+            ],
         ];
         for(let i = 0; i < operators.length; i++) {
             operators[i].forEach(op => op.priority = i);
@@ -763,6 +920,8 @@ class ExtendedBackusNaurFormAnalyser {
                     // Push to expr array as terminal
                     // tokens[i + 1].length === 1のはず
                     terminals.push(new Operand(tokens[i+1][0], token, close));
+                } else if(boxes.charSet.map(a => a[0]).includes(token)) {
+                    terminals.push(new CharSet(tokens[i+1][0], token, close)); 
                 } else if(boxes.comment.map(a => a[0]).includes(token)) {
                     // through
                     // do nothing
@@ -1013,11 +1172,16 @@ class Token extends Group {
                         if(identifer.length !== 1) {
                             return false;
                         }
-                        if(!(identifer[0].constructor === Operand)) {
+
+                        if(!(identifer[0].constructor === Operand || identifer[0].constructor === CharSet)) {
                             // サブクラスは非終端文字ではないので除外
                             return false;
                         }
-                        return identifer[0].symbol === match;
+                        if(identifer[0].constructor === CharSet) {
+                            return identifer[0].match(match);
+                        } else {
+                            return identifer[0].symbol === match;
+                        }
                     });
                     return f;
                 }
@@ -1141,16 +1305,16 @@ class Syntax {
     }
 }
 
-const bnf = `e = ''
-w = ' ' | ' ' w | '\t' | '\t' w | '\n' | '\n' w
+
+const bnf = `e = ""
+w = \\s | \\s w
 white = w | e
-not_zero = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+not_zero = '1-9'
 digit = '0' | not_zero
 digits = digit | digit digits
 integer = white '0' white | white int white
-int = not_zero int_l
-int_l = digits int_l | e
-float = integer | white '0.' digits white | white int '.' digits white
+int = not_zero digits*
+float = integer | white "0." digits white | white int '.' digits white
 sign = white '+' white | white '-' white | white '+' sign | white '-' sign
 <number> = [sign] (integer | float)
 expr = term | term <'+'|'-'> expr
@@ -1201,9 +1365,8 @@ function main() {
     try {
         const lexicalAnalyser = new LexicalAnalyser(bnf, formulas);
         const expr = '(1 + 10 ) * (-1 - 2)  - (0.2 * 2)';
-        const entryPoint = 'expr'
-        const syntax = lexicalAnalyser.parse(expr, entryPoint);
-        console.log(syntax.value);
+        const result = lexicalAnalyser.parse(expr, 'expr');
+        console.log(result.value);
     } catch (e) {
         myconsole.log(e);
     }    

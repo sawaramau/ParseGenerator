@@ -30,6 +30,7 @@
 * 単に`\s`と書くと`' \t\n'`と等価
 * 単に`\d`と書くと`'0123456789'`と等価
 * 単に`.`と書くとあらゆる1文字にマッチする終端文字として扱う。（.+や.*と書くと解析不能になると思う。試してないけど
+* 終端文字列としてi"String"と書くとStringの大文字小文字は無視する
 
 ## 定義サンプル
 
@@ -61,37 +62,53 @@ const formulas = [
             return left.value + right.value;
         }
     }, {
-        match: '-',
-        formula: (self, left, right) => {
+        match: {
+            bnf:'-',
+            nonTerminal:'expr'
+        },
+        formula: (self) => {
+            // term <'+'|'-'> expr 
+            // term: arguments[0]
+            // expr: arguments[1]
+            const left = self.arguments[0];
+            const right = self.arguments[1];
             return left.value - right.value;
         }
     }, {
-        match: '*',
-        formula: (self, left, right) => {
-            return left.value * right.value;
-        }
-    }, {
-        match: '/',
-        formula: (self, left, right) => {
+        match: {
+            nonTerminal:'term'
+        },
+        formula: (self) => {
+            // factor <'*'|'/'> term
+            // factor: arguments.factor
+            // term: arguments.term
+            const left = self.arguments.factor;
+            const right = self.arguments.term;
+            if(self.str === '*') {
+                return left.value * right.value;
+            }
             return left.value / right.value;
         }
-    }, {
+    },  {
         match: '<number>',
         formula: (self) => {
             return Number(self.str);
         }
     }, {
-        match: '<expr>',
+        match: {
+            nonTerminal:'factor'
+        },
         formula: (self) => {
-            return self.children[0].value;
+            return self.arguments.expr.value;
         }
     },
 ];
 const lexicalAnalyser = new LexicalAnalyser(bnf, formulas);
 const expr = '(1 + 10) * (-1 - 2)  - (0.2 * 2)';
 const entryPoint = 'expr'
-const syntax = lexicalAnalyser.parse(expr, entryPoint);
-console.log(syntax.value);
+const result = lexicalAnalyser.parse(expr, entryPoint);
+console.log(result.value);
 ```
 
+* 例えば`number <'+'> number`の引数を取得する場合`left = self.arguments.number[0]; right = self.arguments.number[1]`となる
 * matchのヒット条件詳細はTokenクラスのgetFormula関数を参照

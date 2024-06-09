@@ -75,11 +75,13 @@ class StringObject {
 class Operand {
     #parent;
     #index;
+    #caseInsenitive;
     #offset = 0;
-    constructor(obj, open, close) {
+    constructor(obj, open, close, caseInsenitive = false) {
         this.own = obj;
         this.open = open;
         this.close = close;
+        this.#caseInsenitive = caseInsenitive;
     }
     get depth () {
         if(this.parent === undefined) {
@@ -106,7 +108,7 @@ class Operand {
         return this.own;
     }
     get view() {
-        return this.open + this.own + this.close;
+        return this.open + this.symbol + this.close;
     }
     search(lens, serialized, operand, addlen) {
         const index = serialized.findIndex(op => op === operand);
@@ -189,8 +191,15 @@ class Operand {
         try {
             const self = this;
             return (strObj, index) => {
-                if(strObj.read(index, self.own.length) === self.own) {
-                    return new Syntax(self.own, self);
+                const str = strObj.read(index, self.own.length);
+                if(this.#caseInsenitive) {
+                    if(str.toLowerCase() === self.own.toLowerCase()) {
+                        return new Syntax(str, self);
+                    }    
+                } else {
+                    if(str === self.own) {
+                        return new Syntax(str, self);
+                    }    
                 }
                 return undefined;
             }
@@ -429,7 +438,7 @@ class NonTerminalSymbol extends Operand {
         } catch(e) {
             if(e instanceof RangeError) {
             } else {
-                console.warn(e);
+                myconsole.warn(e);
             }
         }
         for(const key in this.#NonTerminals) {
@@ -511,10 +520,10 @@ class ExtendedBackusNaurFormAnalyser {
         return tokens;
     }
     parseLine(strObj, close = '\n', escape = '\\') {
-        const candidates = ['::=', '=', '|', '<', '>', '+', '*', '(', ')', '[', ']', '"', "'", '//', '.', '\\w', '\\d', '\\s'];
+        const candidates = ['::=', '=', '|', '<', '>', '+', '*', '(', ')', '[', ']', '"', ,'i"', "'", '//', '.', '\\w', '\\d', '\\s', '$'];
         const isEBNFs = ['+', '*', '(', '['];
         const whites = [' ', '\t', '\n'];
-        const others = /^[^\t\n \:=\|\<\>\+\*\(\)\[\]\'\"\/]+$/;
+        const others = /^[^\t\n \:=\|\<\>\+\*\(\)\[\]\'\"\/\\\$]+$/;
         const flags = {
             "<": {
                 state:false,
@@ -601,6 +610,29 @@ class ExtendedBackusNaurFormAnalyser {
                     return [[str], close];
                 },
             },
+            'i"': {
+                state:false,
+                type: 'terminal',
+                escape: '\\',
+                close: '"',
+                parseLine: (strObj) => {
+                    const close = '"';
+                    let str = '';
+                    while(1) {
+                        const c = strObj.shift();
+                        if(c === close) {
+                            if(!/(^|[^\\])(\\\\)*\\$/.test(str)) {
+                                break;
+                            }
+                        }
+                        if(c === '') {
+                            throw "parse error:\n" + str;
+                        }
+                        str += c;
+                    }
+                    return [[str], close];
+                },
+            },
         };
         let gotWord = '';
         const tokens = [];
@@ -664,7 +696,7 @@ class ExtendedBackusNaurFormAnalyser {
     parseTree(tokens) {
         const terminals = [];
         const boxes = {
-            terminal:[['"', '"'],], // ["'", "'"]],
+            terminal:[['"', '"'], ['i"', '"']], // ["'", "'"]],
             charSet: [["'", "'"]],
             comment:[['//', '\n']],
             //nonTerminal:[['<', '>']],
@@ -696,7 +728,7 @@ class ExtendedBackusNaurFormAnalyser {
                                     len += s.length;
                                     str += s.str;
                                 }
-                                return new Syntax(str, operator, children);
+                                return new Syntax(str, operator.largs[0], children);
                             });
                             return analyze(operator.rargs);
                         }
@@ -724,7 +756,7 @@ class ExtendedBackusNaurFormAnalyser {
                                     len += s.length;
                                     str += s.str;
                                 }
-                                return new Syntax(str, operator, children);
+                                return new Syntax(str, operator.largs[0], children);
                             });
                             return analyze(operator.rargs);
                         }
@@ -772,6 +804,30 @@ class ExtendedBackusNaurFormAnalyser {
                         }
                     }
                 },    
+            ],
+            [
+
+                {
+                    symbol: '$',
+                    order : 1, // left
+                    left:[1, 1],
+                    right:[0, 0],
+                    generateAnalyzer: (operator) => {
+                        return (strObj, index) => {
+                            let str = "";
+                            let len = 0;
+                            const children = [];
+                            const s = operator.largs[0].generateAnalyzer(strObj, index + len);
+                            if(s === undefined) {
+                                return undefined;
+                            }
+                            str += s.str;
+                            len += s.length;
+                            children.push(s);
+                            return new Syntax(str, operator, children);
+                        }
+                    }
+                },
             ],
             [
                 {
@@ -842,23 +898,6 @@ class ExtendedBackusNaurFormAnalyser {
                     }
                 },
                 {
-                    symbol: '\\s',
-                    order : 1, // left
-                    left:[0, 0],
-                    right:[0, 0],
-                    generateAnalyzer: (operator) => {
-                        return (strObj, index) => {
-                            let str = strObj.read(index, 1);
-                            const children = [];
-                            const whites = [' ', '\t', '\n'];
-                            if(!whites.includes(str)) {
-                                return undefined;
-                            }
-                            return new Syntax(str, operator, children);
-                        }
-                    }
-                },
-                {
                     symbol: '\\d',
                     order : 1, // left
                     left:[0, 0],
@@ -892,6 +931,23 @@ class ExtendedBackusNaurFormAnalyser {
                         }
                     }
                 },
+                {
+                    symbol: '\\s',
+                    order : 1, // left
+                    left:[0, 0],
+                    right:[0, 0],
+                    generateAnalyzer: (operator) => {
+                        return (strObj, index) => {
+                            let str = strObj.read(index, 1);
+                            const children = [];
+                            const whites = [' ', '\t', '\n'];
+                            if(!whites.includes(str)) {
+                                return undefined;
+                            }
+                            return new Syntax(str, operator, children);
+                        }
+                    }
+                },
 
             ],
         ];
@@ -919,7 +975,7 @@ class ExtendedBackusNaurFormAnalyser {
                 if(boxes.terminal.map(a => a[0]).includes(token)) {
                     // Push to expr array as terminal
                     // tokens[i + 1].length === 1のはず
-                    terminals.push(new Operand(tokens[i+1][0], token, close));
+                    terminals.push(new Operand(tokens[i+1][0], token, close, token === 'i"'));
                 } else if(boxes.charSet.map(a => a[0]).includes(token)) {
                     terminals.push(new CharSet(tokens[i+1][0], token, close)); 
                 } else if(boxes.comment.map(a => a[0]).includes(token)) {
@@ -941,7 +997,11 @@ class ExtendedBackusNaurFormAnalyser {
             } else if (opCandidates.has(token)) {
                 // Push to expr array as operator?
                 const define = operators.find(ops => ops.find(op => op.symbol === token)).find(op => op.symbol === token);
-                terminals.push(new Operator(define));
+                if(token === "$") {
+                    terminals.push(new Argument(define));
+                } else {
+                    terminals.push(new Operator(define));
+                }
             } else {
                 // Add to dictionary
                 // And push to expr array as nonterminal
@@ -1018,20 +1078,7 @@ class ExtendedBackusNaurFormAnalyser {
             throw "二重登録:" + nonTerminal.symbol;
         }
         this.#NonTerminals[nonTerminal.symbol].analyzer = function(strObj, index) {
-            const args = root.rargs;
-            let len = 0;
-            let str = "";
-            const children = [];
-            for(let i = 0; i < args.length; i++) {
-                const s = args[i].generateAnalyzer(strObj, index + len);
-                if(s === undefined) {
-                    return undefined;
-                }
-                children.push(s);
-                len += s.length;
-                str += s.str;
-            }
-            return new Syntax(str, root.largs[0], children);
+            return root.generateAnalyzer(strObj, index);
         }
     }
     execution(strObj, entryPoint = 'expr') {
@@ -1133,6 +1180,17 @@ class LexicalAnalyser {
     }
 }
 
+const str2num = (str) => {
+    const nstr = str.replace(/[\s+]/g, '').replace(/-+/, '-');
+    return Number(nstr);
+}
+
+class Argument extends Operator {
+    constructor(define){
+        super(define);
+    }
+}
+
 class Token extends Group {
     #formulas;
     get identifiers() {
@@ -1185,13 +1243,43 @@ class Token extends Group {
                     });
                     return f;
                 }
+            } else if (match.constructor === Object) {
+                if(match.nonTerminal !== undefined && match.nonTerminal !== this.assigned.symbol) {
+                    return false;
+                } 
+                if(match.nonTerminal && Object.keys(match).length === 1) {
+                    // nonTerminalしか指定がなければそれが合っていればOK
+                    return true;
+                }
+                if(match.bnf !== undefined) {
+                    if(this.identifiers.map(arr => arr.map(obj => obj.view).join('')).includes(match.bnf.trim())) {
+                        return true;
+                    }
+                    return false;
+                }
+                if(match.bnfs !== undefined) {
+                    for(const bnf of match.bnfs) {
+                        if(this.identifiers.map(arr => arr.map(obj => obj.view).join('')).includes(bnf.trim())) {
+                            return true;
+                        }
+                        return false;    
+                    }
+                }
+                return false;
             }
         })?.formula;
+    }
+    get assigned() {
+        let assigned = this.root.largs[0];
+        while(!(assigned instanceof NonTerminalSymbol)) {
+            assigned = assigned.own[0];
+        }
+        return assigned;
     }
     execution(syntax) {
         const formula = this.getFormula(syntax);
         if(formula === undefined) {
-            throw "Syntax define error" + syntax;
+            throw "Syntax define error" + syntax.bnfOperand;
         }
         return formula(syntax, ...syntax.brothers);
     }
@@ -1249,12 +1337,13 @@ class Token extends Group {
                     // カッコ内からみたカッコ外の扱いをうまく考えられない。
                     const found = children.find(syn => syn.bnfOperand === self);
                     if(found) {
-                        const brothers = children.filter(syn => syn !== found);
+                        const brothers = children;//.filter(syn => syn !== found);
                         found.brothers = brothers;
                     }
                     return syntax;
                 }
-            }
+            },
+            configurable: true
         });
     }
 }
@@ -1279,8 +1368,33 @@ class Syntax {
         }
         return this.#brothers;
     }
+    get arguments() {
+        const args = {};
+        const brothers = this.brothers.filter(arg => arg.bnfOperand instanceof Argument);
+        brothers.forEach((br, index) => {
+            const brother = br.children[0];
+            args[index] = brother;
+        });
+        this.#brothers.forEach((br) => {
+            const brother = (() => {
+                if(br.bnfOperand instanceof Argument || br === this) {
+                    return br.children[0];
+                }
+                return br;
+            })();
+            const view = brother.bnfOperand.view;
+            if(!(view in args)) {
+                return args[view] = brother;
+            }
+            if(args[view].constructor === Array) {
+                return args[view].push(brother);
+            }
+            args[view] = [args[view], brother];
+        });
+        return args;
+    }
     get brothers() {
-        return this.#brothers;
+        return this.#brothers.filter(br => br !== this);
     }
     get length() {
         return this.str.length;
@@ -1300,76 +1414,101 @@ class Syntax {
         const child = this.children.filter(child => child.bnfOperand instanceof Token);
         if (child.length === 1) {
             return child[0].value;
+        } else if(child.length) {
+            const values = child.map(c => c.value);
+            return values.slice(-1)[0];
         }
         throw "ここに到達するということはトークンが適切に設定されていないはず・・"
     }
 }
 
-
-const bnf = `e = ""
-w = \\s | \\s w
-white = w | e
-not_zero = '1-9'
-digit = '0' | not_zero
-digits = digit | digit digits
-integer = white '0' white | white int white
-int = not_zero digits*
-float = integer | white "0." digits white | white int '.' digits white
-sign = white '+' white | white '-' white | white '+' sign | white '-' sign
-<number> = [sign] (integer | float)
-expr = term | term <'+'|'-'> expr
-term = factor | factor <'*'|'/'> term
-factor = number | white '(' <expr> ')' white`
-
-const str2num = (str) => {
-    const nstr = str.replace(/[\s+]/g, '').replace(/-+/, '-');
-    return Number(nstr);
+class Parser {
+    constructor() {
+        this.analyzer = new LexicalAnalyser(this.bnf, this.formulas);
+    }
+    get bnf() {
+        return `
+            e = ""
+            w = \\s | \\s w
+            white = w | e
+            not_zero = '1-9'
+            digit = '0' | not_zero
+            digits = digit | digit digits
+            integer = white '0' white | white int white
+            int = not_zero digits*
+            float = integer | white "0." digits white | white int '.' digits white
+            sign = white '+' white | white '-' white | white '+' sign | white '-' sign
+            <number> = [sign] (integer | float)
+            expr = term | term <'+'|'-'> expr
+            term = factor | factor <'*'|'/'> term
+            factor = number | white '(' <expr> ')' white
+        `;
+    }
+    get formulas() {
+        return [
+            {
+                match:'<number>',
+                formula: (self) => {
+                    return str2num(self.str);
+                }
+            },
+            {
+                match:{
+                    nonTerminal:'expr'
+                },
+                formula: (self) => {
+                    const left = self.arguments.term.value;
+                    const right = self.arguments.expr.value;
+                    const symbol = self.str;
+                    if(symbol === '+'){
+                        return left + right;
+                    }
+                    return left - right;
+                }
+            },
+            {
+                match:{
+                    nonTerminal:'term'
+                },
+                formula: (self) => {
+                    const left = self.arguments.factor.value;
+                    const right = self.arguments.term.value;
+                    const symbol = self.str;
+                    if(symbol === '*'){
+                        return left * right;
+                    }
+                    return left / right;
+                }
+            },
+            {
+                match:{
+                    nonTerminal:'factor'
+                },
+                formula: (self) => {
+                    return self.arguments.expr.value;
+                }
+            },
+        ];
+    }
+    parse(expr) {
+        const result = this.analyzer.parse(expr, 'expr');
+        return result;
+    }
 }
-
-const formulas = [
-    {
-        match: '+',
-        formula: (self, left, right) => {
-            // formula(self, ...[brother's syntax object])
-            return left.value + right.value;
-        }
-    }, {
-        match: '-',
-        formula: (self, left, right) => {
-            return left.value - right.value;
-        }
-    }, {
-        match: '*',
-        formula: (self, left, right) => {
-            return left.value * right.value;
-        }
-    }, {
-        match: '/',
-        formula: (self, left, right) => {
-            return left.value / right.value;
-        }
-    }, {
-        match: '<number>',
-        formula: (self) => {
-            return str2num(self.str);
-        }
-    }, {
-        match: '<expr>',
-        formula: (self) => {
-            return self.children[0].value;
-        }
-    },
-];
 
 function main() {
     try {
-        const lexicalAnalyser = new LexicalAnalyser(bnf, formulas);
-        const expr = '(1 + 10 ) * (-1 - 2)  - (0.2 * 2)';
-        const result = lexicalAnalyser.parse(expr, 'expr');
+        const parser = new Parser();
+        const expr = `
+        (1 + 10 ) * (-1 - 2)  - (0.2 * 2)
+        `;
+        const result = parser.parse(expr);
+        console.log('==code==' + result.str.replace(/\n        /g, '\n') + '========');
         console.log(result.value);
     } catch (e) {
         myconsole.log(e);
     }    
 }
+
 
 main();

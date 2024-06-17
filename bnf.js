@@ -520,10 +520,10 @@ class ExtendedBackusNaurFormAnalyser {
         return tokens;
     }
     parseLine(strObj, close = '\n', escape = '\\') {
-        const candidates = ['::=', '=', '|', '<', '>', '+', '*', '(', ')', '[', ']', '"', ,'i"', "'", '//', '.', '\\w', '\\d', '\\s', '$'];
+        const candidates = ['::=', '=', '|', '<', '>', '+', '*', '(', ')', '[', ']', '"', ,'i"', "'", '//', '.', '\\w', '\\d', '\\s', '$', '!'];
         const isEBNFs = ['+', '*', '(', '['];
         const whites = [' ', '\t', '\n'];
-        const others = /^[^\t\n \:=\|\<\>\+\*\(\)\[\]\'\"\/\\\$]+$/;
+        const others = /^[^\t\n \:=\|\<\>\+\*\(\)\[\]\'\"\/\\\$\!]+$/;
         const flags = {
             "<": {
                 state:false,
@@ -804,6 +804,25 @@ class ExtendedBackusNaurFormAnalyser {
                         }
                     }
                 },    
+            ],
+            [
+
+                {
+                    symbol: '!',
+                    order : 1, // left
+                    right:[1, 1],
+                    left:[0, 0],
+                    generateAnalyzer: (operator) => {
+                        return (strObj, index) => {
+                            let len = 0;
+                            const s = operator.rargs[0].generateAnalyzer(strObj, index + len);
+                            if(s !== undefined) {
+                                return undefined;
+                            }
+                            return new Syntax("", operator, []);
+                        }
+                    }
+                },
             ],
             [
 

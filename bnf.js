@@ -1223,6 +1223,9 @@ class Token extends Group {
         }, [[]]);
     }
     getFormula(syntax) {
+        return this.match(syntax)?.formula;
+    }
+    match(syntax) {
         return this.#formulas.find(formula => {
             const match = formula.match;
             if(typeof match === 'string' || match instanceof String) {
@@ -1286,7 +1289,7 @@ class Token extends Group {
                 }
                 return false;
             }
-        })?.formula;
+        });
     }
     get assigned() {
         let assigned = this.root.largs[0];
@@ -1356,7 +1359,7 @@ class Token extends Group {
                     // カッコ内からみたカッコ外の扱いをうまく考えられない。
                     const found = children.find(syn => syn.bnfOperand === self);
                     if(found) {
-                        const brothers = children;//.filter(syn => syn !== found);
+                        const brothers = children; //.filter(syn => syn !== found);
                         found.brothers = brothers;
                     }
                     return syntax;
@@ -1364,6 +1367,18 @@ class Token extends Group {
             },
             configurable: true
         });
+    }
+
+    dummyExecuter(syntax) {
+        /* 
+        return: [
+            {
+                isCall: (caller, obj) => true/false,
+                formula: (syntax, obj, ...brothers) => {},
+            } , ...
+        ]
+        */
+        return this.match(syntax)?.dummy || [];
     }
 }
 
@@ -1396,7 +1411,7 @@ class Syntax {
         });
         this.#brothers.forEach((br) => {
             const brother = (() => {
-                if(br.bnfOperand instanceof Argument || br === this) {
+                if(br.bnfOperand instanceof Argument || br === this){
                     return br.children[0];
                 }
                 return br;
@@ -1423,6 +1438,26 @@ class Syntax {
     }
     get bnfOperand() {
         return this.#bnfOperand;
+    }
+    get dummyExecuter() {
+        /* 
+        executer: {
+            isCall: (caller, obj) => true/false,
+            formula: (caller, obj, ...args) => {},
+        } 
+        */
+        if(this.#bnfOperand.dummyExecuter) {
+            return this.#bnfOperand?.dummyExecuter(this);
+        }
+        return [];
+    }
+    dummyExecute(caller, obj) {
+        this.children?.forEach(child => {
+            child.dummyExecute(caller, obj);
+        });
+        this.dummyExecuter.filter(executer => executer.isCall(caller, obj)).forEach(executer => {    
+            executer.formula(caller, obj, this, ...this.brothers);
+        });
     }
     get value() {
         if(this.bnfOperand instanceof Token) {
@@ -1509,25 +1544,14 @@ class Parser {
             },
         ];
     }
-    parse(expr) {
-        const result = this.analyzer.parse(expr, 'expr');
+    parse(expr, entryPoint = 'expr') {
+        const result = this.analyzer.parse(expr, entryPoint);
         return result;
     }
 }
 
-function main() {
-    try {
-        const parser = new Parser();
-        const expr = `
-        (1 + 10 ) * (-1 - 2)  - (0.2 * 2)
-        `;
-        const result = parser.parse(expr);
-        console.log('==code==' + result.str.replace(/\n        /g, '\n') + '========');
-        console.log(result.value);
-    } catch (e) {
-        myconsole.log(e);
-    }    
+module.exports = {
+    Parser,
+    myconsole,
+    NonTerminalSymbol
 }
-
-
-main();

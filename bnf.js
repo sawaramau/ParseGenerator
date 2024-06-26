@@ -215,6 +215,9 @@ class Operand {
         const serialized = this.serialize;
         return serialized.map(op => op.view).join('');
     }
+    get bnf() {
+        return [this.view];
+    }
 }
 
 class CharSet extends Operand {
@@ -361,6 +364,14 @@ class Group extends Operand {
     }
     postProcess() {
         this.own.forEach(op => op.postProcess());
+    }
+    get bnf() {
+        const bnf = this.own.reduce((acc, obj) => {
+            return acc.concat(obj.bnf);
+        }, []);
+        bnf.unshift(this.open);
+        bnf.push(this.close);
+        return bnf;
     }
 }
 
@@ -1175,6 +1186,11 @@ class Operator extends Operand  {
     get view() {
         return this.symbol;
     }
+    get bnf() {
+        const bnf = this.largs.reduce((acc, o) => acc.concat(o.bnf), []);
+        bnf.push(this.view);
+        return this.rargs.reduce((acc, o) => acc.concat(o.bnf), bnf);
+    }
     get generateAnalyzer() {
         const self = this;
         try {
@@ -1212,6 +1228,7 @@ class Argument extends Operator {
 
 class Token extends Group {
     #formulas;
+
     get identifiers() {
         return this.serialize.reduce((acc, cur) => {
             if(cur instanceof Operator && cur.symbol === '|') {
@@ -1233,14 +1250,14 @@ class Token extends Group {
                 if(s === '<' && e === '>') {
                     // 非終端文字1個指定の場合
                     const m = match.slice(1, -1);
-                    const f = this.identifiers.find(identifer => {
-                        if(identifer.length !== 1) {
+                    const f = this.identifiers.find(identifier => {
+                        if(identifier.length !== 1) {
                             return false;
                         }
-                        if(!(identifer[0] instanceof NonTerminalSymbol)) {
+                        if(!(identifier[0] instanceof NonTerminalSymbol)) {
                             return false;
                         }
-                        return identifer[0].symbol === m;
+                        return identifier[0].symbol === m;
                     });
                     return f;
                 } else {
@@ -1248,19 +1265,19 @@ class Token extends Group {
                     if(syntax.str !== match) {
                         return false;
                     }
-                    const f = this.identifiers.find(identifer => {
-                        if(identifer.length !== 1) {
+                    const f = this.identifiers.find(identifier => {
+                        if(identifier.length !== 1) {
                             return false;
                         }
 
-                        if(!(identifer[0].constructor === Operand || identifer[0].constructor === CharSet)) {
+                        if(!(identifier[0].constructor === Operand || identifier[0].constructor === CharSet)) {
                             // サブクラスは非終端文字ではないので除外
                             return false;
                         }
-                        if(identifer[0].constructor === CharSet) {
-                            return identifer[0].match(match);
+                        if(identifier[0].constructor === CharSet) {
+                            return identifier[0].match(match);
                         } else {
-                            return identifer[0].symbol === match;
+                            return identifier[0].symbol === match;
                         }
                     });
                     return f;
@@ -1273,19 +1290,12 @@ class Token extends Group {
                     // nonTerminalしか指定がなければそれが合っていればOK
                     return true;
                 }
+                const bnf = syntax.identifier.reduce((acc, obj) => acc.concat(obj.bnfOperand.bnf), []);
                 if(match.bnf !== undefined) {
-                    if(this.identifiers.map(arr => arr.map(obj => obj.view).join('')).includes(match.bnf.trim())) {
-                        return true;
-                    }
-                    return false;
+                    return bnf.join('') === match.bnf;
                 }
                 if(match.bnfs !== undefined) {
-                    for(const bnf of match.bnfs) {
-                        if(this.identifiers.map(arr => arr.map(obj => obj.view).join('')).includes(bnf.trim())) {
-                            return true;
-                        }
-                        return false;    
-                    }
+                    return match.bnfs.includes(bnf.join(''));
                 }
                 return false;
             }
@@ -1389,6 +1399,39 @@ class Syntax {
         this.str = string;
         this.#bnfOperand = bnfOperand;
         this.children = children;
+    }
+
+    get identifier() {
+        if(!(this.#bnfOperand instanceof Token)) {
+            throw "とりあえずTokenの場合のSyntaxだけ考える";
+        }
+        if(this.children.length === 0) {
+            throw "childrenがいないTokenはいても困る";
+        }
+        if (this.children.length > 1) {
+            // childrenが1より多いなら、childrenが本体
+            return this.children;
+        }
+        if (
+            this.children.length === 1
+            && !(this.children[0].bnfOperand instanceof Operator && this.children[0].bnfOperand.symbol === '|')
+            && !(this.children[0].bnfOperand instanceof Group && this.children[0].bnfOperand.open === '(' && this.children[0].bnfOperand.close === ')')
+        ) {
+            return this.children;
+        }
+        let children = this.children;
+        while(1) {
+            if(children[0].children === undefined || children[0].children.length === 0) {
+                return children;
+            }
+            if(children[0].children.length > 1) {
+                return [children[0]];
+            }
+            if(!(children[0].children[0].bnfOperand instanceof Operator && children[0].children[0].bnfOperand.symbol === '|')) {
+                return children[0].children;
+            }
+            children = children[0].children;
+        }
     }
     set brother(val) {
         return this.#brothers.push(val);
